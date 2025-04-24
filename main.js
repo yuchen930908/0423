@@ -54,16 +54,19 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // === 多條獨立波浪參數 ===
-    const numWaves = 20; // 你想要的波浪條數
+    const numWaves = 40; // 波浪條數由20改為40
     const multiWaves = [];
     for (let i = 0; i < numWaves; i++) {
+        // 藍色系：色相固定200~230，亮度依序遞增
+        const hue = 210 + 20 * (i / (numWaves - 1)); // 210~230
+        const light = 35 + 40 * (i / (numWaves - 1)); // 35%~75%
         multiWaves.push({
             verticalCenter: window.innerHeight * (0.1 + 0.8 * i / (numWaves - 1)),
             baseAmplitude: 60 + Math.random() * 80,
             frequency: 0.001 + Math.random() * 0.004,
             phase: Math.random() * Math.PI * 2,
             speed: 0.01 + Math.random() * 0.02,
-            color: `hsl(${180 + i * 8}, 70%, 50%)`,
+            color: `hsl(${hue}, 70%, ${light}%)`,
             // 線條粗細：最細0.5，最粗3，依序遞增
             lineWidth: 0.5 + (i * 2.5) / (numWaves - 1)
         });
@@ -106,6 +109,25 @@ document.addEventListener('DOMContentLoaded', function() {
         ctx.stroke();
     }
     
+    // 使用平滑曲線繪製波浪（改為色塊填滿下方區域）
+    function drawSmoothWaveFilled(points, fillColor) {
+        if (points.length < 2) return;
+        const startX = -canvas.width * extensionFactor;
+        ctx.beginPath();
+        ctx.moveTo(startX, 0); // 從畫面頂端開始
+        for (let i = 0; i < points.length; i++) {
+            const x = startX + i;
+            ctx.lineTo(x, points[i]);
+        }
+        ctx.lineTo(startX + points.length - 1, canvas.height); // 畫到底部
+        ctx.lineTo(startX, canvas.height); // 回到左下
+        ctx.closePath();
+        ctx.fillStyle = fillColor;
+        ctx.globalAlpha = 0.45; // 疊加透明度
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+    
     // 自然平滑波形函數 - 加入水平偏移
     function generateWavePoint(x, time, offset) {
         const adjustedX = x + offset;
@@ -136,17 +158,75 @@ document.addEventListener('DOMContentLoaded', function() {
         return value;
     }
 
-    // 幾何小魚繪製（4正方形組成大正方形，整體旋轉45度，魚鰭為菱形，與身體邊線貼齊）
-    function drawLittleFish(progress) {
+    // 幾何小魚繪製（4正方形組成大正方形，整體旋轉45度，魚鰭為三角形，與身體邊線貼齊）
+    const fishCount = 14;
+    // 每隻魚的基礎位置、靈敏度、方向、大小
+    let fishes = [];
+    function randomizeFishes() {
+        fishes = [];
+        const w = canvas.width, h = canvas.height;
+        // 以4x4格分布（最多16格，取前14格），分布於中央（X:0.30~0.50, Y:0.50~0.80）
+        const gridRows = 4, gridCols = 4;
+        const xStart = 0.30, xEnd = 0.50;
+        const yStart = 0.50, yEnd = 0.80;
+        let gridIndices = [];
+        for (let i = 0; i < gridRows * gridCols; i++) gridIndices.push(i);
+        // 隨機取14格
+        gridIndices = gridIndices.sort(() => Math.random() - 0.5).slice(0, fishCount);
+        for (let i = 0; i < fishCount; i++) {
+            const minSize = 0.036 * w;
+            const maxSize = 0.09 * w;
+            const size = minSize + Math.random() * (maxSize - minSize);
+            const bodySize = size * 2;
+            const margin = bodySize * Math.SQRT2 / 2;
+            // 取格點
+            const gridIdx = gridIndices[i];
+            const row = Math.floor(gridIdx / gridCols);
+            const col = gridIdx % gridCols;
+            const gridX = xStart + (xEnd - xStart) * (col / (gridCols - 1));
+            const gridY = yStart + (yEnd - yStart) * (row / (gridRows - 1));
+            // 在格點附近隨機微調，避免完全重疊
+            const jitterX = (Math.random() - 0.5) * 0.04;
+            const jitterY = (Math.random() - 0.5) * 0.04;
+            const baseX = margin + (w - 2 * margin) * (gridX + jitterX);
+            const baseY = margin + (h - 2 * margin) * (gridY + jitterY);
+            // 隨機靈敏度（移動幅度）
+            const sensX = 0.15 + 0.7 * Math.random();
+            const sensY = 0.15 + 0.7 * Math.random();
+            // 隨機方向（+1或-1）
+            const dirX = Math.random() < 0.5 ? 1 : -1;
+            const dirY = Math.random() < 0.5 ? 1 : -1;
+            fishes.push({
+                baseX, baseY, sensX, sensY, dirX, dirY, size,
+                x: baseX, y: baseY, targetX: baseX, targetY: baseY
+            });
+        }
+    }
+    randomizeFishes();
+    window.addEventListener('resize', function() {
+        resizeCanvas();
+        randomizeFishes();
+    });
+    // 修改 drawLittleFish 支援指定位置
+    function drawLittleFish(progress, customX, customY, customSize) {
         if (progress <= 0) return;
         const w = canvas.width, h = canvas.height;
         ctx.save();
         ctx.globalAlpha = Math.max(0, Math.min(1, progress));
-        // 小魚主體（4個正方形組成大正方形，整體旋轉45度）
-        const size = 0.025 * w;
+        // 支援自訂 size
+        const size = customSize !== undefined ? customSize : 0.025 * w;
         const bodySize = size * 2;
-        const centerX = 0.72 * w + bodySize / 2;
-        const centerY = 0.16 * h + bodySize / 2;
+        // 限制魚中心點不超出畫面
+        let centerX, centerY;
+        if (customX !== undefined && customY !== undefined && customX !== null && customY !== null) {
+            // 預留邊界：魚身體對角線一半
+            const margin = bodySize * Math.SQRT2 / 2;
+            centerX = Math.max(margin, Math.min(w - margin, customX));
+            centerY = Math.max(margin, Math.min(h - margin, customY));
+        } else {
+            centerX = 0.72 * w + bodySize / 2 + fishX;
+            centerY = 0.16 * h + bodySize / 2 + fishY;
+        }
         ctx.save();
         ctx.translate(centerX, centerY);
         ctx.rotate(Math.PI / 4); // 整體旋轉45度
@@ -171,18 +251,16 @@ document.addEventListener('DOMContentLoaded', function() {
         ctx.fillStyle = '#e6a23c';
         ctx.fill();
         ctx.restore();
-        // 魚鰭（三角形，與身體邊線貼齊）
-        // 右上鰭：與身體右上邊線貼齊
-        // 右上邊線兩端點
+        // 魚鰭（三角形，與身體邊線貼齊，縮小一點）
         const bodyDiag = bodySize / Math.SQRT2;
-        // 右上三角鰭
         const edge1x = centerX + bodyDiag / 2;
         const edge1y = centerY - bodyDiag / 2;
         const edge2x = centerX + bodyDiag;
         const edge2y = centerY;
+        const finScale = 0.45; // 鰭縮小比例
         ctx.beginPath();
         ctx.moveTo(edge1x, edge1y);
-        ctx.lineTo(edge1x + size * 0.7, edge1y - size * 0.7);
+        ctx.lineTo(edge1x + size * finScale, edge1y - size * finScale);
         ctx.lineTo(edge2x, edge2y);
         ctx.closePath();
         ctx.fillStyle = '#e6a23c';
@@ -194,7 +272,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const edge4y = centerY;
         ctx.beginPath();
         ctx.moveTo(edge3x, edge3y);
-        ctx.lineTo(edge3x + size * 0.7, edge3y + size * 0.7);
+        ctx.lineTo(edge3x + size * finScale, edge3y + size * finScale);
         ctx.lineTo(edge4x, edge4y);
         ctx.closePath();
         ctx.fillStyle = '#e6a23c';
@@ -227,12 +305,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 const y = wave.verticalCenter + generateMultiWavePoint(x + horizontalOffset, time, horizontalOffset, wave);
                 points[i] = y;
             }
-            ctx.strokeStyle = wave.color;
-            ctx.lineWidth = wave.lineWidth;
-            drawSmoothWave(points);
+            // 填色塊（海浪效果）
+            drawSmoothWaveFilled(points, wave.color);
+            // 若要同時保留線條可加下行
+            // ctx.strokeStyle = wave.color; ctx.lineWidth = wave.lineWidth; drawSmoothWave(points);
         }
-        // === 幾何小魚浮現（橢圓身體+三角形鰭尾，無眼睛） ===
-        drawLittleFish(1);
+        // 畫14隻魚（每隻魚位置獨立、大小不同）
+        for (let i = 0; i < fishCount; i++) {
+            drawLittleFish(1, fishes[i].x, fishes[i].y, fishes[i].size);
+        }
         requestAnimationFrame(drawWave);
     }
 
@@ -290,12 +371,28 @@ document.addEventListener('DOMContentLoaded', function() {
                         const rawValue = Number.parseInt(line.trim(), 10);
                         if (!Number.isNaN(rawValue)) {
                             // 讓一個旋鈕同時控制多個參數，讓波浪變化更豐富
-                            // 振幅 50~200
                             baseAmplitude = 50 + (rawValue / 1023) * 150;
-                            // 頻率 0.001~0.005
                             waveParams.frequency = 0.001 + (rawValue / 1023) * 0.004;
-                            // 速度 0.01~0.03
                             waveParams.speed = 0.01 + (rawValue / 1023) * 0.02;
+                            // 每隻魚根據自己的靈敏度/方向計算目標位置
+                            const percent = rawValue / 1023;
+                            for (let i = 0; i < fishCount; i++) {
+                                const f = fishes[i];
+                                const w = canvas.width, h = canvas.height;
+                                const size = f.size;
+                                const bodySize = size * 2;
+                                const margin = bodySize * Math.SQRT2 / 2;
+                                // 移動幅度最大為畫面寬/高的 0.25，並考慮邊界
+                                const maxX = (w - 2 * margin) * 0.25 * f.sensX;
+                                const maxY = (h - 2 * margin) * 0.18 * f.sensY;
+                                let tx = f.baseX + f.dirX * (percent - 0.5) * 2 * maxX;
+                                let ty = f.baseY + f.dirY * (percent - 0.5) * 2 * maxY;
+                                // 限制目標位置不超出畫面
+                                tx = Math.max(margin, Math.min(w - margin, tx));
+                                ty = Math.max(margin, Math.min(h - margin, ty));
+                                f.targetX = tx;
+                                f.targetY = ty;
+                            }
                         }
                     }
                 }
@@ -308,4 +405,23 @@ document.addEventListener('DOMContentLoaded', function() {
             await serialReader.releaseLock();
         }
     }
+
+    // 幀間平滑移動每隻魚
+    function smoothFishMove() {
+        for (let i = 0; i < fishCount; i++) {
+            const f = fishes[i];
+            const w = canvas.width, h = canvas.height;
+            const size = f.size;
+            const bodySize = size * 2;
+            const margin = bodySize * Math.SQRT2 / 2;
+            // 平滑移動
+            f.x += (f.targetX - f.x) * 0.08;
+            f.y += (f.targetY - f.y) * 0.08;
+            // 限制實際位置不超出畫面
+            f.x = Math.max(margin, Math.min(w - margin, f.x));
+            f.y = Math.max(margin, Math.min(h - margin, f.y));
+        }
+        requestAnimationFrame(smoothFishMove);
+    }
+    smoothFishMove();
 });
